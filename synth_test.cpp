@@ -1,11 +1,11 @@
 /**
- * @file 	playback_sine_high.cpp
+ * @file 	synth_test.cpp
  *
- * @date 	11.3.2013
- * @author 	Zdenek Travnicek <travnicek@iim.cz>
- * @copyright GNU Public License 3.0
+ * @date 	20.11.2022
+ * @author 	Martin Helmich <helmima1@fel.cvut.cz>
+ * @author 	Veronika Ovsyannikova <ovsyaver@fel.cvut.cz>
  *
- * Sample program generating sine and playing it out using high level API.
+ * The coolest program on earth.
  */
 
 
