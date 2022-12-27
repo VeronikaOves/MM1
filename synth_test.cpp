@@ -128,6 +128,56 @@ private:
 
 enum WaveShape { Sine, Triangle, Saw, Square };
 
+class WaveShapesGeneratorOld : public AudioFilter
+{
+public:
+	WaveShapesGeneratorOld(double frequency, WaveShape shape) : AudioFilter(pAudioFilter()), shape(shape)
+	{
+	}
+
+	void change_shape(WaveShape shape) {
+		this->shape = shape;
+	}
+
+	void set_frequency(double frequency) {
+		std::unique_lock<std::mutex> lock(frequency_mutex_);
+
+		frequency_ = frequency;
+	}
+
+private:
+	error_type_t do_process(audio_buffer_t& buffer)
+	{
+		std::unique_lock<std::mutex> lock(frequency_mutex_);
+		const double step = 1.0 / convert_rate_to_int(buffer.params.rate);
+		for (auto& sample : buffer.data) {
+			sample = static_cast<int16_t>(max_val * std::sin(time_ * frequency_ * pi2));
+			time_ = time_ + step;
+		}
+		buffer.valid_samples = buffer.data.size();
+		return error_type_t::ok;
+		switch (shape) {
+		case WaveShape::Sine:
+			
+			break;
+		/*
+		case WaveShape::Triangle:
+			break;
+		case WaveShape::Saw:
+			break;
+		case WaveShape::Square:
+			break;
+			*/
+		default:
+			break;
+		}
+	}
+
+	WaveShape shape;
+	double frequency_;
+	double time_;
+	std::mutex frequency_mutex_;
+};
 
 /**
 * Generator abstract class for Sine, Triangle, Saw and Square wave shapes. In addition to AudioFilter class it has set_frequency method, otherweise it is the same as 
@@ -467,12 +517,13 @@ private:
 };
 
 /**
-* Nastavuje se frekvence a hloubka od 0-1
-* 
+* @brief Creates tremolo effect - changes volume of buffer based on sine shape
+* @param frequency - frequency of a modulating wave of type double in bounds from 0.0 to 20.0
+* @param dept - how much volume should be taken in the peak of the wave: 1.0 = sound goes down to 0 volume, 0.0 = volume doesn't change at all; type double in bounds 0.0-1.0
 */
 class TremoloEffect : public AudioFilter {
 public:
-	TremoloEffect(const pAudioFilter& child, double frequency, double dept) : AudioFilter(child), frequency(frequency), time(0.0) {
+	TremoloEffect(const pAudioFilter& child, double frequency, double dept, bool state) : AudioFilter(child), frequency(frequency), time(0.0), state(state) {
 		if (dept > 1.0) {
 			dept = 1.0;
 		}
@@ -483,7 +534,18 @@ public:
 		}
 		this->dept = dept / 2.0;
 	}
+
+	void set_state(bool state) {
+		this->state = state;
+	}
+	void set_frequency(bool frequency) {
+		this->frequency = frequency;
+	}
+	void set_dept(bool dept) {
+		this->dept = dept;
+	}
 private:
+	bool state;
 	double frequency;
 	double time;
 	double dept;
@@ -491,22 +553,24 @@ private:
 		const audio_params_t& params = buffer.params;
 		const double step = 1.0 / convert_rate_to_int(buffer.params.rate);
 		//const double step = (1 / seconds) / convert_rate_to_int(params.rate);
-		for (auto& sample : buffer.data) {
-			double temp = this->dept*std::sin(time * frequency * pi2 + pi2/4)+1-this->dept;
-			/*
-			if (temp < 0) {
-				temp *= -1;
+		if (state) {
+			for (auto& sample : buffer.data) {
+				double temp = this->dept * std::sin(time * frequency * pi2 + pi2 / 4) + 1 - this->dept;
+				/*
+				if (temp < 0) {
+					temp *= -1;
+				}
+				*/
+				sample *= temp;
+				time = time + step;
 			}
-			*/
-			sample *= temp;
-			time = time + step;
 		}
 		return error_type_t::ok;
 	}
 };
 
 /**
-* Start je startovací prvek, end je končící
+* 
 */
 class CircularBuffer {
 private:
@@ -554,16 +618,52 @@ public:
 
 /**
 * @brief Creates chorus effect on incoming audio buffer using circular buffer
-* @param rate Rate of modulating wave, accepts input between 0-10 of type double
+* @param rate Rate of modulating wave, accepts input between 0-20 of type double
 * @param delay_level Strength of modulating wave, accepts input between 1-10 of type double
 * @param dry_wet_ratio Mix between two effects expressed in percentege from 0-1 of type double
 */
 class ChorusEffect : public AudioFilter {
 public:
-	ChorusEffect(const pAudioFilter& child, double rate, double delay_level, double dry_wet_ratio, size_t circular_buffer_size = 250) : AudioFilter(child),
-		rate(rate), delay_level(delay_level), dry_wet_ratio(dry_wet_ratio), time(0.0), start(true),
+	ChorusEffect(const pAudioFilter& child, double rate, double delay_level, double dry_wet_ratio, bool state, size_t circular_buffer_size = 250) : AudioFilter(child),
+		rate(rate), delay_level(delay_level), dry_wet_ratio(dry_wet_ratio), time(0.0), start(true), state(state),
 		circular_buffer(CircularBuffer(circular_buffer_size)), circular_buffer_size(circular_buffer_size) {
 		//TODO: optimalizovat velikost circular bufferu, takhle to spíše jenom odhaduji
+		if (rate < 0.0) {
+			this->rate = 0.0;
+		}
+		else {
+			if (rate > 20.0) {
+				this->rate = 20.0;
+			}
+		}
+		if (delay_level < 0.0) {
+			this->delay_level = 0.0;
+		}
+		else {
+			if (delay_level >10.0) {
+				this->delay_level = 10.0;
+			}
+		}
+		if (dry_wet_ratio < 0.0) {
+			this->dry_wet_ratio = 0.0;
+		}
+		else {
+			if (dry_wet_ratio > 1.0) {
+				this->dry_wet_ratio = 1.0;
+			}
+		}
+	}
+	void set_state(bool state) {
+		this->state = state;
+	}
+	void set_rate(double rate) {
+		this->rate = rate;
+	}
+	void set_delay_level(double delay_level) {
+		this->delay_level = delay_level;
+	}
+	void set_dry_wet_ration(double dry_wet_ratio) {
+		this->dry_wet_ratio = dry_wet_ratio;
 	}
 private:
 	void add_chorus(audio_sample_t& sample, const double& step) {
@@ -582,26 +682,29 @@ private:
 		const double step = 1.0 / convert_rate_to_int(buffer.params.rate);
 		size_t counter = 0;
 		std::unique_lock<std::mutex> lock(mutex_);
-		for (auto& sample : buffer.data) {
-			if (start) {
-				circular_buffer.push_back(sample);
-				if (counter < circular_buffer_size) {
-					counter++;
+		if (state) {
+			for (auto& sample : buffer.data) {
+				if (start) {
+					circular_buffer.push_back(sample);
+					if (counter < circular_buffer_size) {
+						counter++;
+					}
+					else {
+						start = false;
+					}
 				}
 				else {
-					start = false;
+					circular_buffer.push_back(sample);
+					add_chorus(sample, step);
+					//sample = circular_buffer.read_sample(0);
 				}
+				time = time + step;
 			}
-			else {
-				circular_buffer.push_back(sample);
-				add_chorus(sample, step);
-				//sample = circular_buffer.read_sample(0);
-			}
-			time = time + step;
 		}
 		buffer.valid_samples = buffer.data.size();
 		return error_type_t::ok;
 	}
+	bool state;
 	double rate;
 	double delay_level;
 	double dry_wet_ratio;
@@ -612,6 +715,154 @@ private:
 	bool start;
 }; 
 
+/**
+* @brief Creates chorus effect on incoming audio buffer using circular buffer
+* @param rate Rate of modulating wave, accepts input between 0-10 of type double
+* @param delay_level Strength of modulating wave, accepts input between 1-10 of type double
+* @param dry_wet_ratio Mix between two effects expressed in percentege from 0-100
+*/
+class ChorusEffectOld : public AudioFilter {
+public:
+	ChorusEffectOld(const pAudioFilter& child, double rate, double delay_level, double dry_wet_ratio, size_t circular_buffer_size = 100) : AudioFilter(child),
+		rate(rate), delay_level(delay_level), dry_wet_ratio(dry_wet_ratio), time(0.0),
+		circular_buffer(circular_buffer_t<audio_sample_t>(circular_buffer_size)), circular_buffer_size(circular_buffer_size) {
+		//TODO: optimalizovat velikost circular bufferu, takhle to spíše jenom odhaduji
+	}
+private:
+	audio_sample_t get_sample_from_circ_buff(circular_buffer_t<audio_sample_t>& buffer, size_t& index) {
+		if (buffer.start_ < buffer.end_) {
+			return buffer.data[buffer.start_ + index];
+		}
+		else {
+			// Vždycky tady bude buffer.start_ větší než buffer.end_
+			return buffer.data[(buffer.start_ + index) % buffer.data.size()];
+		}
+	}
+
+	void addChorus(audio_sample_t& sample, const double& step) {
+		// Spočtu jak moc velký delay mám mít
+		double sin = std::sin(time * rate * pi2);
+		size_t delay = ((std::sin(time * rate * pi2) + 1) / 2) * delay_level + 15;
+		delay = circular_buffer_size - delay;
+		// Sample, který chci přičítat k tomu originalnimu
+		audio_sample_t desired_sample = circular_buffer.data[((circular_buffer.start_ + delay) % circular_buffer.data.size())];
+		sample = circular_buffer.start_;
+	}
+
+	error_type_t do_process(audio_buffer_t& buffer) {
+		// V první fázi čekám na naplnění circular bufferu
+		// Až bude naplněný, tak spustím funkci 
+
+		const audio_params_t& params = buffer.params;
+		const double step = 1.0 / convert_rate_to_int(buffer.params.rate);
+		size_t counter = 0;
+		audio_sample_t sample_from_circ_buff = audio_sample_t();
+		for (auto& sample : buffer.data) {
+			/*
+			if (counter < 100) {
+				circular_buffer.store_data(const_cast<const audio_sample_t*>(&sample), 1);
+				counter++;
+			}
+			else {
+				circular_buffer.get_data_block(&sample_from_circ_buff, 1); // tímhle vytahuji data z circular bufferu o velikosti jednoho bloku
+				circular_buffer.store_data(const_cast<const audio_sample_t*>(&sample), 1);
+				//sample = circular_buffer.data[(circular_buffer.start_+10) % circular_buffer_size];
+				sample = sample_from_circ_buff;
+				//addChorus(sample, step);
+
+			}
+			time = time + step;
+			*/
+		}
+		//buffer.valid_samples = buffer.data.size();
+		return error_type_t::ok;
+	}
+	double rate;
+	double delay_level;
+	double dry_wet_ratio;
+	size_t circular_buffer_size;
+	circular_buffer_t<audio_sample_t> circular_buffer;
+
+	double time;
+};
+
+class FadeInM : public AudioFilter {
+public:
+	FadeInM(const pAudioFilter& child, double seconds) : AudioFilter(child), seconds(seconds), multiply_coeff(0) { 
+	}
+private:
+	double seconds;
+	double multiply_coeff;
+	error_type_t do_process(audio_buffer_t& buffer) {
+		const audio_params_t& params = buffer.params;
+		const double step = (1 / seconds) / convert_rate_to_int(params.rate);
+		for (auto& sample : buffer.data) {
+			sample *= multiply_coeff;
+			if (multiply_coeff < 1.0) {
+				multiply_coeff += step;
+			} else {
+				if (multiply_coeff > 1.0) {
+					multiply_coeff = 1.0;
+				}
+			}
+		}
+		//buffer.valid_samples = buffer.data.size();
+		return error_type_t::ok;
+	}
+};
+
+class FadeOutM : public AudioFilter {
+public:
+	FadeOutM(const pAudioFilter& child, double seconds) : AudioFilter(child), seconds(seconds), multiply_coeff(1) {
+	}
+private:
+	double seconds;
+	double multiply_coeff;
+	error_type_t do_process(audio_buffer_t& buffer) {
+		const audio_params_t& params = buffer.params;
+		const double step = (1 / seconds) / convert_rate_to_int(params.rate);
+		for (auto& sample : buffer.data) {
+			sample *= multiply_coeff;
+			if (multiply_coeff > 0.0) {
+				multiply_coeff -= step;
+			}
+			else {
+				if (multiply_coeff < 0.0) {
+					multiply_coeff = 0.0;
+				}
+			}
+		}
+		//buffer.valid_samples = buffer.data.size();
+		return error_type_t::ok;
+	}
+};
+
+class FadeOut : public AudioFilter
+{
+public:
+	FadeOut(const pAudioFilter& child) :AudioFilter(child)
+	{};
+private:
+	error_type_t do_process(audio_buffer_t& buffer)
+	{
+		const double step = 1.0 / convert_rate_to_int(buffer.params.rate);
+		auto sample_index_beg = int(buffer.data.size() * fade_out_beginning);
+		auto fade_step = 1.0 / (buffer.data.size() - sample_index_beg);
+		double volume_level = 1.0;
+
+		for (size_t i = sample_index_beg; i < buffer.data.size(); ++i) {
+			volume_level -= fade_step;
+			buffer.data[i] *= volume_level;
+		}
+		buffer.valid_samples = buffer.data.size();
+
+		return error_type_t::ok;
+	}
+double time_;
+double fade_out_beginning = 0.9 ;
+};
+
+// ---------------------------------------
 
 class Envelope_effect : public AudioFilter
 {
@@ -653,7 +904,6 @@ public:
 	static const rgb_t dark_blue;
 	static const rgb_t light_yellow;
 	static const rgb_t dark_yellow;
-
 
 	Control(const pAudioFilter& child, int width, int height) :
 		SDLDevice(width, height, "Frequency control", false),
@@ -731,6 +981,10 @@ private:
 		auto envelope_effect = std::dynamic_pointer_cast<Envelope_effect>(get_child(2));
 		envelope_effect->turn_off();
 	}
+
+	void turn_off_tremolo() {
+
+	}
 	/**
 	 * Overloaded method for handling keys from SDL window
 	 * @param key  Number of the key pressed, defined in keys.h
@@ -772,7 +1026,7 @@ private:
 	{
 		if (button == 0 && pressed) {
 			{
-				// check if it is inside envelope effect input window
+				// Check if it is inside envelope effect input window
 				if (has_intersect(x, y, envelope_input_window) && envelope_effect_enabled) {
 					hide_last_drawn_line();
 
@@ -780,7 +1034,7 @@ private:
 					envelope_input_window_entred = true;
 				}
 
-				// check if it is the envelope effect off button
+				// Check if it is the envelope effect off button
 				if (has_intersect(x, y, envelope_off_button)) {
 					if (envelope_effect_enabled) {
 						envelope_effect_enabled = false;
@@ -794,8 +1048,11 @@ private:
 						iimavlib::draw_empty_rectangle(data_, envelope_input_window, border_thickness, light_green);
 					}
 				}
+
+				std::unique_lock<std::mutex> lock(position_mutex_); // Lock the variables
+
 			}
-			std::unique_lock<std::mutex> lock(position_mutex_); // lock the variables
+
 			update_screen();
 		}
 
@@ -913,10 +1170,10 @@ int main(int argc, char** argv) try
 		.add<Envelope_effect>()
 		//.add<AddNoise>()
 		//.add<FadeOutM>(1.0)
-		.add<TremoloEffect>(3, 0.0)
+		.add<TremoloEffect>(1.1, 0.8, false)
 		//.add<SineMultiply>(7)
 		//.add<SimpleEchoFilter>(0.01, 0.9)
-		.add<ChorusEffect>(1.2, 10, 0.8)
+		.add<ChorusEffect>(5, 3, 0.8, true)
 		//.add<SineMultiply>(329.63)
 		//.add<SineMultiply>(392.00)
 		//.add<VolumeChanger>()
