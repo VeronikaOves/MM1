@@ -126,7 +126,7 @@ private:
 	std::mutex frequency_mutex_;
 };
 
-enum WaveShape { Sine, Triangle, Saw, Square };
+enum WaveShape { Sine, Triangle, Saw, Square, Undefined};
 
 /**
 * Generator abstract class for Sine, Triangle, Saw and Square wave shapes. In addition to AudioFilter class it has set_frequency method, otherweise it is the same as 
@@ -191,7 +191,7 @@ protected:
 class WaveShapesGenerator : public AudioFilter
 {
 public:
-	WaveShapesGenerator(double frequency, WaveShape shape) : AudioFilter(pAudioFilter()), shape(shape), frequency_(frequency),
+	WaveShapesGenerator(double frequency) : AudioFilter(pAudioFilter()), shape(WaveShape::Undefined), frequency_(frequency),
 		time_(0.0), sample_prep(0), direction(true), adding_coeff(0)
 	{
 	}
@@ -200,6 +200,11 @@ public:
 
 		frequency_ = frequency;
 	}
+	
+	void set_wave_shape(WaveShape shape) {
+		this->shape = shape;
+	}
+
 private:
 	error_type_t do_process(audio_buffer_t& buffer)
 	{
@@ -207,6 +212,11 @@ private:
 		const double step = 1.0 / convert_rate_to_int(buffer.params.rate);
 		std::unique_lock<std::mutex> lock(frequency_mutex_);
 		switch (shape) {
+		case WaveShape::Undefined:
+			for (auto& sample : buffer.data) {
+				sample = 0;
+			}
+			break;
 		case WaveShape::Sine:
 			for (auto& sample : buffer.data) {
 				sample = static_cast<int16_t>(max_val * std::sin(time_ * frequency_ * pi2));
@@ -683,7 +693,7 @@ public:
 	{
 		rgb_t color(0, 0, 255);
 
-		// Draw the buttons
+		// Draw buttons
 		iimavlib::draw_empty_rectangle(data_, envelope_input_window, border_thickness, dark_green);
 		iimavlib::draw_circle(data_, envelope_off_button, red);
 
@@ -695,6 +705,15 @@ public:
 		iimavlib::draw_empty_rectangle(data_, tremolo_input_1, border_thickness, dark_blue);
 		iimavlib::draw_empty_rectangle(data_, tremolo_input_2, border_thickness, dark_blue);
 		iimavlib::draw_circle(data_, tremolo_off_button, red);
+
+		//Draw sine wave shape
+		create_sine_wave_shape();
+		create_square_wave_shape();
+		create_triangle_wave_shape();
+		create_saw_wave_shape();
+
+		draw_disabled_wave_shape_buttons();
+
 
 		blit(data_);
 
@@ -715,6 +734,7 @@ private:
 	bool envelope_input_window_entred = false;
 	bool envelope_effect_enabled = true;
 	std::vector<std::pair<int, int>> envelope_input_line = std::vector<std::pair<int, int>>();
+	WaveShape wave_shape_selected = WaveShape::Undefined;
 
 	// UI
 	const rectangle_t envelope_input_window = rectangle_t(37, 60, 300, 190);
@@ -736,10 +756,71 @@ private:
 	const rectangle_t chorus_off_button = rectangle_t(738, 504, 30, 30);
 	const rectangle_t tremolo_off_button = rectangle_t(738, 213, 30, 30);
 
+	const rectangle_t sine_wave_off_button = rectangle_t(240, 340, 30, 30);
+	const rectangle_t square_wave_off_button = rectangle_t(240, 395, 30, 30);
+	const rectangle_t triangle_wave_off_button = rectangle_t(240, 448, 30, 30);
+	const rectangle_t saw_wave_off_button = rectangle_t(240, 504, 30, 30);
+
+	std::vector<rectangle_t> sine_wave_shape = std::vector<rectangle_t>();
+	std::vector<rectangle_t> square_wave_shape = std::vector<rectangle_t>();
+	std::vector<rectangle_t> triangle_wave_shape = std::vector<rectangle_t>();
+	std::vector<rectangle_t> saw_wave_shape = std::vector<rectangle_t>();
+
+	void create_sine_wave_shape() {
+		for (int x = 100; x < 200; ++x) {
+			int y = 15*std::sin((1.0/7.0)*(double)x) + 350;
+			sine_wave_shape.push_back(rectangle_t(x, y));
+		}
+	}
+
+	void create_square_wave_shape() {
+		int counter = 0;
+		for (int x = 90, y = 425; x <= 205;) {
+			if (counter == 2) {
+				counter = 0;
+				if (y == 425) {
+					y = 395;
+				}
+				else {
+					y = 425;
+				}
+			}
+			if (counter == 1) {
+				x += 35;
+			}
+			square_wave_shape.push_back(rectangle_t(x, y));
+			++counter;
+		}
+	}
+
+	void create_triangle_wave_shape() {
+		for (int x = 90, y = 480; x <= 205; x += 35) {
+			triangle_wave_shape.push_back(rectangle_t(x, y));
+			if (y == 480) {
+				y = 450;
+			}
+			else {
+				y = 480;
+			}
+		};
+	}
+
+	void create_saw_wave_shape() {
+		saw_wave_shape.push_back(rectangle_t(90, 530));
+		saw_wave_shape.push_back(rectangle_t(140, 505));
+		saw_wave_shape.push_back(rectangle_t(140, 535));
+		saw_wave_shape.push_back(rectangle_t(200, 505));
+	}
+
 	// Filter controllers
 	void set_frequency(double freq) {
 		auto generator = std::dynamic_pointer_cast<WaveShapesGenerator>(get_child(4));
 		generator->set_frequency(freq);
+	}
+
+	void set_wave_shape(WaveShape shape) {
+		auto generator = std::dynamic_pointer_cast<WaveShapesGenerator>(get_child(4));
+		generator->set_wave_shape(shape);
 	}
 
 	void set_envelope_effect_input(std::vector<std::pair<double, double>>& line) {
@@ -755,6 +836,7 @@ private:
 	void turn_off_tremolo() {
 
 	}
+
 	/**
 	 * Overloaded method for handling keys from SDL window
 	 * @param key  Number of the key pressed, defined in keys.h
@@ -780,12 +862,6 @@ private:
 		return true;
 	}
 
-#define DBOUT( s )            \
-{                             \
-   std::ostringstream os_;    \
-   os_ << s;                   \
-   OutputDebugString( os_.str().c_str() );  \
-}
 	/**
 	 * Overloaded method for processing mouse buttons.
 	 * @param button Index of button that triggered the event
@@ -805,7 +881,7 @@ private:
 				}
 
 				// Check if it is the envelope effect off button
-				if (has_intersect(x, y, envelope_off_button)) {
+				else if (has_intersect(x, y, envelope_off_button)) {
 					if (envelope_effect_enabled) {
 						envelope_effect_enabled = false;
 						hide_last_drawn_line();
@@ -819,10 +895,61 @@ private:
 					}
 				}
 
+				else if (has_intersect(x, y, sine_wave_off_button)) {
+					draw_disabled_wave_shape_buttons();
+					if (wave_shape_selected == WaveShape::Sine) {
+						wave_shape_selected = WaveShape::Undefined;
+					}
+					else {
+						wave_shape_selected = WaveShape::Sine;;
+						iimavlib::draw_circle(data_, sine_wave_off_button, light_green);
+						iimavlib::draw_polyline(data_, sine_wave_shape, light_yellow);
+					}
+					set_wave_shape(wave_shape_selected);
+				}
+
+				else if (has_intersect(x, y, square_wave_off_button)) {
+					draw_disabled_wave_shape_buttons();
+					if (wave_shape_selected == WaveShape::Square) {
+						wave_shape_selected = WaveShape::Undefined;
+					}
+					else {
+						wave_shape_selected = WaveShape::Square;
+						iimavlib::draw_circle(data_, square_wave_off_button, light_green);
+						iimavlib::draw_polyline(data_, square_wave_shape, light_green);
+					}
+					set_wave_shape(wave_shape_selected);
+				}
+
+				else if (has_intersect(x, y, triangle_wave_off_button)) {
+					draw_disabled_wave_shape_buttons();
+					if (wave_shape_selected == WaveShape::Triangle) {
+						wave_shape_selected = WaveShape::Undefined;
+					}
+					else {
+						wave_shape_selected = WaveShape::Triangle;
+						iimavlib::draw_circle(data_, triangle_wave_off_button, light_green);
+						iimavlib::draw_polyline(data_, triangle_wave_shape, light_blue);
+					}
+					set_wave_shape(wave_shape_selected);
+				}
+
+				else if (has_intersect(x, y, saw_wave_off_button)) {
+					draw_disabled_wave_shape_buttons();
+					if (wave_shape_selected == WaveShape::Saw) {
+						wave_shape_selected = WaveShape::Undefined;
+					}
+					else {
+						wave_shape_selected = WaveShape::Saw;
+						iimavlib::draw_circle(data_, saw_wave_off_button, light_green);
+						iimavlib::draw_polyline(data_, saw_wave_shape, light_violet);
+					}
+					set_wave_shape(wave_shape_selected);
+				}
+
 				std::unique_lock<std::mutex> lock(position_mutex_); // Lock the variables
 
 			}
-
 			update_screen();
 		}
 
@@ -873,6 +1000,19 @@ private:
 		iimavlib::draw_rectangle(data_, envelope_input_window_without_borders, black);
 	}
 
+	void draw_disabled_wave_shape_buttons() {
+		iimavlib::draw_circle(data_, sine_wave_off_button, red);
+		iimavlib::draw_circle(data_, square_wave_off_button, red);
+		iimavlib::draw_circle(data_, triangle_wave_off_button, red);
+		iimavlib::draw_circle(data_, saw_wave_off_button, red);
+
+		iimavlib::draw_polyline(data_, sine_wave_shape, dark_yellow);
+		iimavlib::draw_polyline(data_, square_wave_shape, dark_green);
+		iimavlib::draw_polyline(data_, triangle_wave_shape, dark_blue);
+		iimavlib::draw_polyline(data_, saw_wave_shape, dark_violet);
+		
+	}
+
 	void convert_line_to_envelope_effect_input() {
 		// Pixel on x axis is 0.02 sec, from 0 sec to 5 sec on the whole axis
 		double axis_x_rate = 5;
@@ -907,18 +1047,7 @@ const rgb_t Control::dark_blue(40, 105, 132);
 
 int main(int argc, char** argv) try
 {
-	/* ******************************************************************
-	 *                      Process parameters
-	 ****************************************************************** */
-	//if (argc < 2) {
-	//	logger[log_level::fatal] << "Not enough parameters. Specify the frequency, please.";
-	//	logger[log_level::fatal] << "Usage: " << argv[0] << " frequency [audio_device]";
-	//	return 1;
-	//}
-	//const double frequency = std::stod(argv[1]);
-	//const double frequency = simple_cast<double>(argv[1]);
 	const double frequency = 660;
-	const double maxVolumeLevel = 1.0;
 	logger[log_level::debug] << "Generating sine with frequency " << frequency << "Hz.";
 
 	audio_id_t device_id = PlatformDevice::default_device();
@@ -932,36 +1061,17 @@ int main(int argc, char** argv) try
 	 ****************************************************************** */
 
 	 // Create filter chain
-
-
-	auto chain = filter_chain<WaveShapesGenerator>(frequency, WaveShape::Square)
+	auto chain = filter_chain<WaveShapesGenerator>(frequency)
 		.add<WaveSink>("xx.wav")
-		//.add<VolumeChanger>(maxVolumeLevel)
 		.add<Envelope_effect>()
-		//.add<AddNoise>()
-		//.add<FadeOutM>(1.0)
 		.add<TremoloEffect>(1.1, 0.8, false)
-		//.add<SineMultiply>(7)
-		//.add<SimpleEchoFilter>(0.01, 0.9)
-		.add<ChorusEffect>(5, 3, 0.8, true)
-		//.add<SineMultiply>(329.63)
-		//.add<SineMultiply>(392.00)
-		//.add<VolumeChanger>()
+		.add<ChorusEffect>(5, 3, 0.8, false)
 		.add<Control>(800, 600)
 		.add<PlatformSink>(device_id) // moje reproduktory
 		.sink();
 
 	// Start the filters
 	chain->run();
-
-	/*
-	 * Alternative syntax would be:
-	 * auto sine = std::make_shared<SineGenerator>(frequency);
-	 * auto sink = std::make_shared<PlatformSink>(sine, device_id);
-	 * sink->run();
-	 *
-	 */
-
 
 }
 catch (std::exception& e)
